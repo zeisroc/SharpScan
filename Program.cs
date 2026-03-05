@@ -55,6 +55,13 @@ var options = new ScanOptions
     MaxConcurrency = concurrency
 };
 
+var sourceHostname = System.Net.Dns.GetHostName();
+var sourceAddresses = System.Net.Dns.GetHostAddresses(sourceHostname);
+var sourceIp = sourceAddresses
+    .FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+    ?.ToString() ?? "unknown";
+Console.WriteLine($"# {sourceIp} / {sourceHostname}");
+
 var results = new ConcurrentDictionary<string, ConcurrentBag<int>>();
 
 var engine = new ScanEngine();
@@ -66,7 +73,7 @@ await engine.RunAsync(options, (ip, port) =>
 foreach (var (ip, ports2) in results.OrderBy(kv => kv.Key, StringComparer.Ordinal))
 {
     var sorted = ports2.Order();
-    Console.WriteLine($"{ip}: {string.Join(", ", sorted)}");
+    Console.WriteLine($"{ip}:{string.Join(",", sorted)}");
 }
 
 return 0;
