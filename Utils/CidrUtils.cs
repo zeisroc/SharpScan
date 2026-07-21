@@ -4,7 +4,7 @@ namespace SharpScan.Utils;
 
 static class CidrUtils
 {
-    public static IEnumerable<IPAddress> Enumerate(string cidr)
+    public static IEnumerable<IPAddress> Enumerate(string cidr, CancellationToken ct = default)
     {
         var slash = cidr.IndexOf('/');
         if (slash < 0) yield break;
@@ -27,6 +27,8 @@ static class CidrUtils
 
         for (uint ip = first; ip <= last; ip++)
         {
+            ct.ThrowIfCancellationRequested();
+
             yield return new IPAddress(new byte[]
             {
                 (byte)(ip >> 24),

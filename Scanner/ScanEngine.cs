@@ -6,53 +6,65 @@ sealed class ScanEngine
 {
     public async Task RunAsync(ScanOptions options, Action<string, int> onResult, CancellationToken ct)
     {
-        using var semaphore = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
+        var semaphore = new SemaphoreSlim(options.MaxConcurrency, options.MaxConcurrency);
+        var scanTasksCompleted = false;
 
         // Materialise ports once; they may be iterated many times (one per target)
         var ports = options.Ports is ICollection<int> col ? col : options.Ports.ToArray();
 
-        foreach (var target in options.Targets)
+        try
         {
-            if (ct.IsCancellationRequested) break;
-
-            IEnumerable<IPAddress> addresses;
-            try { addresses = TargetParser.Parse(target); }
-            catch { continue; }
-
-            foreach (var ip in addresses)
+            foreach (var target in options.Targets)
             {
                 if (ct.IsCancellationRequested) break;
 
-                foreach (var port in ports)
+                IEnumerable<IPAddress> addresses;
+                try { addresses = TargetParser.Parse(target, ct); }
+                catch { continue; }
+
+                foreach (var ip in addresses)
                 {
                     if (ct.IsCancellationRequested) break;
 
-                    await semaphore.WaitAsync(ct).ConfigureAwait(false);
-
-                    var capturedIp = ip;
-                    var capturedPort = port;
-
-                    _ = Task.Run(async () =>
+                    foreach (var port in ports)
                     {
-                        try
+                        if (ct.IsCancellationRequested) break;
+
+                        await semaphore.WaitAsync(ct).ConfigureAwait(false);
+
+                        var capturedIp = ip;
+                        var capturedPort = port;
+
+                        _ = Task.Run(async () =>
                         {
-                            var open = await PortScanner.ScanAsync(capturedIp, capturedPort, options.TimeoutMs, ct)
-                                .ConfigureAwait(false);
-                            if (open)
-                                onResult(capturedIp.ToString(), capturedPort);
-                        }
-                        catch { /* silently ignore */ }
-                        finally
-                        {
-                            semaphore.Release();
-                        }
-                    }, ct);
+                            try
+                            {
+                                var open = await PortScanner.ScanAsync(capturedIp, capturedPort, options.TimeoutMs, ct)
+                                    .ConfigureAwait(false);
+                                if (open)
+                                    onResult(capturedIp.ToString(), capturedPort);
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+                            catch { /* silently ignore */ }
+                            finally
+                            {
+                                semaphore.Release();
+                            }
+                        });
+                    }
                 }
             }
-        }
 
-        // Drain: wait until all in-flight tasks have released the semaphore
-        for (var i = 0; i < options.MaxConcurrency; i++)
-            await semaphore.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            for (var i = 0; i < options.MaxConcurrency; i++)
+                await semaphore.WaitAsync(ct).ConfigureAwait(false);
+
+            scanTasksCompleted = true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        finally
+        {
+            if (scanTasksCompleted)
+                semaphore.Dispose();
+        }
     }
 }

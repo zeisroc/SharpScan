@@ -70,6 +70,9 @@ await engine.RunAsync(options, (ip, port) =>
     results.GetOrAdd(ip, _ => new ConcurrentBag<int>()).Add(port);
 }, cts.Token);
 
+if (cts.IsCancellationRequested)
+    return 130;
+
 foreach (var (ip, ports2) in results.OrderBy(kv => kv.Key, StringComparer.Ordinal))
 {
     var sorted = ports2.Order();
